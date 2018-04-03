@@ -40,8 +40,13 @@ const (
 	ctMaxSysctl           string = "/proc/sys/net/nf_conntrack_max"
 	machinesDir           string = "/var/lib/machines"
 	machinesImage         string = "/var/lib/machines.raw"
-	coreosStableVersion   string = "1478.0.0"
+	distroStableVersion   string = "1478.0.0"
 )
+
+var imageURLMap = map[string]string{
+	"coreos":  "https://alpha.release.core-os.net/amd64-usr/current/coreos_developer_container.bin.bz2",
+	"flatcar": "https://alpha.release.flatcar-linux.net/amd64-usr/current/flatcar_developer_container.bin.bz2",
+}
 
 func GetPoolSize(baseImage string, nodes int) (int64, error) {
 	var poolSize, extraSize, biSize int64 // in bytes
@@ -256,7 +261,7 @@ func runBtrfsDisableQuota() error {
 	return nil
 }
 
-func EnsureRequirements() error {
+func EnsureRequirements(machinectlImage string) error {
 	// TODO: should be moved to pkg/config/defaults.go
 	if err := WriteNetConf(); err != nil {
 		errors.Wrap(err, "error writing CNI configuration")
@@ -274,9 +279,8 @@ func EnsureRequirements() error {
 	ensureIptables()
 	// check for SELinux enforcing mode
 	ensureSelinux()
-	// check for Container Linux version
-	// TODO: this hardcodes usage of coreos
-	ensureCoreosVersion()
+	// check for Distro version, either Container Linux or Flatcar Linux
+	ensureDistroVersion(machinectlImage)
 	return nil
 }
 
@@ -571,29 +575,29 @@ func ensureSelinux() {
 	}
 }
 
-func checkCoreosSemver(coreosVer string) error {
-	v, err := semver.NewVersion(coreosVer)
+func checkDistroSemver(distroVer string) error {
+	v, err := semver.NewVersion(distroVer)
 	if err != nil {
 		return err
 	}
 
-	c, err := semver.NewConstraint(">=" + coreosStableVersion)
+	c, err := semver.NewConstraint(">=" + distroStableVersion)
 	if err != nil {
-		log.Printf("cannot get constraint for >= %s: %v", coreosStableVersion, err)
+		log.Printf("cannot get constraint for >= %s: %v", distroStableVersion, err)
 		return err
 	}
 
 	if c.Check(v) {
 		return nil
 	} else {
-		return fmt.Errorf("ERROR: Container Linux version %s is too low in your local image.", coreosVer)
+		return fmt.Errorf("ERROR: Container Linux version %s is too low in your local image.", distroVer)
 	}
 }
 
-func checkCoreosVersion() error {
+func checkDistroVersion(imageName string) error {
 	args := []string{
 		"image-status",
-		"coreos",
+		imageName,
 	}
 
 	cmd := exec.Command("machinectl", args...)
@@ -605,9 +609,9 @@ func checkCoreosVersion() error {
 		return err
 	}
 
-	checkCoreosVersionField := func(values []string) error {
+	checkDistroVersionField := func(values []string) error {
 		for _, v := range values {
-			if err := checkCoreosSemver(strings.TrimSpace(v)); err != nil {
+			if err := checkDistroSemver(strings.TrimSpace(v)); err != nil {
 				if err == semver.ErrInvalidSemVer {
 					// just meaning it's not a version field, so continue to the next field
 					continue
@@ -639,7 +643,7 @@ func checkCoreosVersion() error {
 
 		// now the line has the key "OS", so get the version field in the values
 		values := strings.Fields(valueStr)
-		if err := checkCoreosVersionField(values); err != nil {
+		if err := checkDistroVersionField(values); err != nil {
 			return err
 		}
 	}
@@ -647,7 +651,7 @@ func checkCoreosVersion() error {
 	return nil
 }
 
-func pullRawCoreosImage() error {
+func pullRawDistroImage(imageName string) error {
 	var cmdPath string
 	var err error
 
@@ -657,12 +661,17 @@ func pullRawCoreosImage() error {
 		cmdPath = "/usr/bin/machinectl"
 	}
 
+	url, ok := imageURLMap[imageName]
+	if !ok {
+		return fmt.Errorf("error finding a URL for downloading image %s", imageName)
+	}
+
 	args := []string{
 		cmdPath,
 		"pull-raw",
 		"--verify=no",
-		"https://alpha.release.core-os.net/amd64-usr/current/coreos_developer_container.bin.bz2",
-		"coreos",
+		url,
+		imageName,
 	}
 
 	cmd := exec.Cmd{
@@ -680,24 +689,24 @@ func pullRawCoreosImage() error {
 	return nil
 }
 
-func ensureCoreosVersion() {
-	if err := checkCoreosVersion(); err != nil {
+func ensureDistroVersion(imageName string) {
+	if err := checkDistroVersion(imageName); err != nil {
 		log.Println(err)
-		log.Fatalf("You will need to remove the image by 'sudo machinectl remove coreos' then the next run of kube-spawn will download version %s of coreos image automatically.", coreosStableVersion)
+		log.Fatalf("You will need to remove the image by 'sudo machinectl remove %s' then the next run of kube-spawn will download version %s of coreos image automatically.", imageName, distroStableVersion)
 	}
 }
 
-func PrepareCoreosImage() error {
-	// If no coreos image exists, just download it
-	if !machinectl.ImageExists("coreos") {
-		log.Printf("pulling coreos image...")
-		if err := pullRawCoreosImage(); err != nil {
+func PrepareDistroImage(imageName string) error {
+	// If no image exists, just download it
+	if !machinectl.ImageExists(imageName) {
+		log.Printf("pulling %s image...", imageName)
+		if err := pullRawDistroImage(imageName); err != nil {
 			return err
 		}
 	} else {
-		// If coreos image is not new enough, remove the existing image,
+		// If distro image is not new enough, remove the existing image,
 		// then next time `kube-spawn up` will download a new image again.
-		ensureCoreosVersion()
+		ensureDistroVersion(imageName)
 	}
 	return nil
 }

@@ -295,15 +295,15 @@ func prepareBaseRootfs(rootfsDir string, clusterSettings *ClusterSettings) error
 	return nil
 }
 
-func (c *Cluster) Start(numberNodes int, cniPluginDir string) error {
+func (c *Cluster) Start(numberNodes int, cniPluginDir, machinectlImage string) error {
 	if numberNodes < 1 {
 		return errors.Errorf("cannot start less than 1 node")
 	}
-	if err := bootstrap.PrepareCoreosImage(); err != nil {
+	if err := bootstrap.PrepareDistroImage(machinectlImage); err != nil {
 		return err
 	}
 
-	if err := bootstrap.EnsureRequirements(); err != nil {
+	if err := bootstrap.EnsureRequirements(machinectlImage); err != nil {
 		return err
 	}
 
@@ -351,7 +351,7 @@ func (c *Cluster) Start(numberNodes int, cniPluginDir string) error {
 
 			log.Printf("Waiting for machine %s to start up ...", machineName)
 
-			if err := nspawntool.Run("coreos", c.BaseRootfsPath(), path.Join(c.MachineRootfsPath(), machineName), machineName, cniPluginDir); err != nil {
+			if err := nspawntool.Run(machinectlImage, c.BaseRootfsPath(), path.Join(c.MachineRootfsPath(), machineName), machineName, cniPluginDir); err != nil {
 				errorChan <- errors.Wrapf(err, "Failed to start machine %s", machineName)
 				return
 			}

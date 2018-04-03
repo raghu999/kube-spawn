@@ -41,6 +41,7 @@ func init() {
 	startCmd.Flags().BoolVar(&flagSkipInit, "skip-cluster-init", false, "Skips cluster initialization through kubeadm")
 	startCmd.Flags().IntP("nodes", "n", 3, "Number of nodes to start")
 	startCmd.Flags().String("cni-plugin-dir", "/opt/cni/bin", "Path to directory with CNI plugins")
+	startCmd.Flags().String("machinectl-image", "flatcar", "Name of the machinectl image to use for the kube-spawn containers")
 
 	viper.BindPFlags(startCmd.Flags())
 }
@@ -54,13 +55,14 @@ func runStart(cmd *cobra.Command, args []string) {
 	clusterName := viper.GetString("cluster-name")
 	numberNodes := viper.GetInt("nodes")
 	cniPluginDir := viper.GetString("cni-plugin-dir")
+	machinectlImage := viper.GetString("machinectl-image")
 
 	kluster, err := cluster.New(path.Join(kubespawnDir, "clusters", clusterName), clusterName)
 	if err != nil {
 		log.Fatalf("Failed to create cluster object: %v", err)
 	}
 
-	if err := kluster.Start(numberNodes, cniPluginDir); err != nil {
+	if err := kluster.Start(numberNodes, cniPluginDir, machinectlImage); err != nil {
 		log.Fatalf("Failed to start cluster: %v", err)
 	}
 
